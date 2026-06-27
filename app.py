@@ -11,12 +11,21 @@ and always available — the focus is the RAG architecture, not a frontier LLM.
 
 import gradio as gr
 import numpy as np
+import torch
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
-from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 EMBEDDER = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-GENERATOR = pipeline("text2text-generation", model="google/flan-t5-base")
+_TOKENIZER = AutoTokenizer.from_pretrained("google/flan-t5-base")
+_GEN_MODEL = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base").eval()
+
+
+def generate(prompt: str) -> str:
+    inputs = _TOKENIZER(prompt, return_tensors="pt", truncation=True, max_length=512)
+    with torch.no_grad():
+        out_ids = _GEN_MODEL.generate(**inputs, max_new_tokens=200)
+    return _TOKENIZER.decode(out_ids[0], skip_special_tokens=True)
 
 # in-memory index for the currently loaded document
 STATE = {"chunks": [], "embeddings": None, "name": None}
@@ -61,8 +70,7 @@ def answer(question: str, k: int = 3):
         "If the answer is not in the context, say you don't know.\n\n"
         f"Context:\n{context}\n\nQuestion: {question}\nAnswer:"
     )
-    out = GENERATOR(prompt, max_new_tokens=200, truncation=True,
-                    do_sample=False)[0]["generated_text"]
+    out = generate(prompt)
 
     sources = "\n\n".join(
         f"**[{rank + 1}]** (score {sims[i]:.2f}) {STATE['chunks'][i][:280]}…"
